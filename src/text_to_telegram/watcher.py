@@ -64,14 +64,6 @@ class InputWatcher:
 
     def _atomic_write(self, content: str) -> None:
         """Atomically write content to input.txt."""
-        if not content:
-            # Just delete the file if empty
-            try:
-                self.input_path.unlink()
-            except FileNotFoundError:
-                pass
-            return
-
         # Write to temp file, then rename
         fd, tmp_path = tempfile.mkstemp(dir=self.input_path.parent)
         try:
