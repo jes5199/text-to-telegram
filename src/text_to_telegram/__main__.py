@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import fcntl
+import sys
 from pathlib import Path
 
 from telegram.ext import Application, MessageHandler as TelegramMessageHandler, filters
@@ -41,6 +43,15 @@ def main() -> None:
     # Load config
     config_path = args.config or Path("config.json")
     config = load_config(config_path)
+
+    # Acquire global lock to prevent multiple instances for the same chat
+    lock_path = Path(f"/tmp/text-to-telegram-{config.chat_id}.lock")
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"Another instance is already running for chat {config.chat_id}", file=sys.stderr)
+        sys.exit(1)
 
     # Set up the application
     app = Application.builder().token(config.token).build()
