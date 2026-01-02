@@ -1,6 +1,6 @@
 # text-to-telegram
 
-A Telegram bot that bridges messages to/from text files, following the [file-tmux-file](https://github.com/...) pattern.
+A Telegram bot that bridges messages to/from text files.
 
 ## What It Does
 
