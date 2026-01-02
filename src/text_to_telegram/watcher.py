@@ -50,6 +50,11 @@ class InputWatcher:
         # Process escape sequences
         message = line.replace("\\n", "\n")
 
+        # Skip empty or whitespace-only messages
+        if not message.strip():
+            self._atomic_write(remaining)
+            return
+
         # Try to send
         try:
             await self.bot.send_message(chat_id=self.chat_id, text=message)
