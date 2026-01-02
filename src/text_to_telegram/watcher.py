@@ -2,6 +2,7 @@
 
 import asyncio
 import tempfile
+import time
 from pathlib import Path
 
 from telegram import Bot
@@ -15,13 +16,20 @@ class InputWatcher:
         self.interval = interval_ms / 1000
         self.input_path = Path("input.txt")
         self._typing = False
+        self._typing_until_send = False
+        self._typing_last_activity: float = 0
+        self._typing_timeout = 5 * 60  # 5 minutes
 
     async def run(self) -> None:
         """Watch input.txt and send messages."""
         while True:
             await self._process_input()
             if self._typing:
-                await self._send_typing()
+                # Check for persistent typing timeout
+                if not self._typing_until_send and time.monotonic() - self._typing_last_activity > self._typing_timeout:
+                    self._typing = False
+                else:
+                    await self._send_typing()
             await asyncio.sleep(self.interval)
 
     async def _send_typing(self) -> None:
@@ -57,9 +65,20 @@ class InputWatcher:
             self._atomic_write(remaining)
             return
 
-        # Handle /typing command
+        # Handle typing commands
         if line == "/typing":
             self._typing = True
+            self._typing_until_send = True
+            self._atomic_write(remaining)
+            return
+        if line == "/set typing":
+            self._typing = True
+            self._typing_until_send = False
+            self._typing_last_activity = time.monotonic()
+            self._atomic_write(remaining)
+            return
+        if line == "/unset typing":
+            self._typing = False
             self._atomic_write(remaining)
             return
 
@@ -74,7 +93,12 @@ class InputWatcher:
         # Try to send
         try:
             await self.bot.send_message(chat_id=self.chat_id, text=message)
-            self._typing = False
+            if self._typing_until_send:
+                self._typing = False
+                self._typing_until_send = False
+            elif self._typing:
+                # Reset timeout for persistent typing
+                self._typing_last_activity = time.monotonic()
         except TelegramError as e:
             print(f"Failed to send message: {e}")
             # Remove the line anyway to avoid infinite retry
