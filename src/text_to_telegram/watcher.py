@@ -14,12 +14,22 @@ class InputWatcher:
         self.chat_id = chat_id
         self.interval = interval_ms / 1000
         self.input_path = Path("input.txt")
+        self._typing = False
 
     async def run(self) -> None:
         """Watch input.txt and send messages."""
         while True:
             await self._process_input()
+            if self._typing:
+                await self._send_typing()
             await asyncio.sleep(self.interval)
+
+    async def _send_typing(self) -> None:
+        """Send typing indicator."""
+        try:
+            await self.bot.send_chat_action(chat_id=self.chat_id, action="typing")
+        except TelegramError:
+            pass
 
     async def _process_input(self) -> None:
         """Process one line from input.txt if available."""
@@ -47,6 +57,12 @@ class InputWatcher:
             self._atomic_write(remaining)
             return
 
+        # Handle /typing command
+        if line == "/typing":
+            self._typing = True
+            self._atomic_write(remaining)
+            return
+
         # Process escape sequences
         message = line.replace("\\n", "\n")
 
@@ -58,6 +74,7 @@ class InputWatcher:
         # Try to send
         try:
             await self.bot.send_message(chat_id=self.chat_id, text=message)
+            self._typing = False
         except TelegramError as e:
             print(f"Failed to send message: {e}")
             # Remove the line anyway to avoid infinite retry
