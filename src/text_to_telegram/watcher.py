@@ -1,6 +1,7 @@
 """Input file watcher - monitors input.txt and sends messages."""
 
 import asyncio
+import fcntl
 import tempfile
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ class InputWatcher:
         self.chat_id = chat_id
         self.interval = interval_ms / 1000
         self.input_path = Path("input.txt")
+        self.lock_path = Path("input.txt.lock")
         self._typing = False
         self._typing_until_send = False
         self._typing_last_activity: float = 0
@@ -44,69 +46,78 @@ class InputWatcher:
         if not self.input_path.exists():
             return
 
+        lock_file = None
         try:
-            content = self.input_path.read_text()
-        except OSError:
-            return
+            lock_file = open(self.lock_path, "w")
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        if not content:
-            return
+            try:
+                content = self.input_path.read_text()
+            except OSError:
+                return
 
-        # Find first complete line
-        newline_pos = content.find("\n")
-        if newline_pos == -1:
-            return  # No complete line yet
+            if not content:
+                return
 
-        line = content[:newline_pos]
-        remaining = content[newline_pos + 1:]
+            # Find first complete line
+            newline_pos = content.find("\n")
+            if newline_pos == -1:
+                return  # No complete line yet
 
-        if not line:
-            # Empty line, just remove it
-            self._atomic_write(remaining)
-            return
+            line = content[:newline_pos]
+            remaining = content[newline_pos + 1:]
 
-        # Handle typing commands
-        if line == "/typing":
-            self._typing = True
-            self._typing_until_send = True
-            self._atomic_write(remaining)
-            return
-        if line == "/set typing":
-            self._typing = True
-            self._typing_until_send = False
-            self._typing_last_activity = time.monotonic()
-            self._atomic_write(remaining)
-            return
-        if line == "/unset typing":
-            self._typing = False
-            self._atomic_write(remaining)
-            return
+            if not line:
+                # Empty line, just remove it
+                self._atomic_write(remaining)
+                return
 
-        # Process escape sequences
-        message = line.replace("\\n", "\n")
-
-        # Skip empty or whitespace-only messages
-        if not message.strip():
-            self._atomic_write(remaining)
-            return
-
-        # Try to send
-        try:
-            await self.bot.send_message(chat_id=self.chat_id, text=message)
-            if self._typing_until_send:
-                self._typing = False
+            # Handle typing commands
+            if line == "/typing":
+                self._typing = True
+                self._typing_until_send = True
+                self._atomic_write(remaining)
+                return
+            if line == "/set typing":
+                self._typing = True
                 self._typing_until_send = False
-            elif self._typing:
-                # Reset timeout for persistent typing
                 self._typing_last_activity = time.monotonic()
-        except TelegramError as e:
-            print(f"Failed to send message: {e}")
-            # Remove the line anyway to avoid infinite retry
-            self._atomic_write(remaining)
-            return
+                self._atomic_write(remaining)
+                return
+            if line == "/unset typing":
+                self._typing = False
+                self._atomic_write(remaining)
+                return
 
-        # Success - remove the line
-        self._atomic_write(remaining)
+            # Process escape sequences
+            message = line.replace("\\n", "\n")
+
+            # Skip empty or whitespace-only messages
+            if not message.strip():
+                self._atomic_write(remaining)
+                return
+
+            # Try to send
+            try:
+                await self.bot.send_message(chat_id=self.chat_id, text=message)
+                if self._typing_until_send:
+                    self._typing = False
+                    self._typing_until_send = False
+                elif self._typing:
+                    # Reset timeout for persistent typing
+                    self._typing_last_activity = time.monotonic()
+            except TelegramError as e:
+                print(f"Failed to send message: {e}")
+                # Remove the line anyway to avoid infinite retry
+                self._atomic_write(remaining)
+                return
+
+            # Success - remove the line
+            self._atomic_write(remaining)
+        finally:
+            if lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+                lock_file.close()
 
     def _atomic_write(self, content: str) -> None:
         """Atomically write content to input.txt."""

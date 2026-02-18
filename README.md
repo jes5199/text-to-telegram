@@ -85,6 +85,17 @@ Second message
 
 Each complete line (ending with newline) is sent and removed. The file remains empty after all messages are sent.
 
+Writers must acquire `input.txt.lock` before appending to avoid data loss:
+
+```bash
+(
+  flock 9
+  echo "hello" >> input.txt
+) 9>input.txt.lock
+```
+
+The bot holds this lock while reading and removing lines. Without it, appended content can be lost during the read-remove cycle.
+
 For multi-line messages, use literal `\n`:
 
 ```
